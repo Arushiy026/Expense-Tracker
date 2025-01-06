@@ -1,0 +1,2011 @@
+#include <gtk/gtk.h>
+#include <string.h>  // For strcmp()
+#include <stdlib.h>  // For atof() and atoi()
+#include <stdio.h>   // For file handling
+
+// File to store expenses
+#define FILE_PATH "expense_track.txt"
+
+// Global pointers to manage windows
+GtkWidget *loading_window = NULL;
+GtkWidget *main_window = NULL;
+GtkWidget *login_window = NULL;
+GtkWidget *progress_bar = NULL;  // Progress bar widget
+
+// Entry widgets for login
+GtkWidget *entry_username, *entry_password;
+
+// Entry widgets for the main window
+GtkWidget *entry_desc, *entry_amount, *entry_category, *entry_date, *entry_delete, *entry_category_view;
+GtkWidget *text_view; // Text view to display expenses
+
+// Expense structure and array
+#define MAX_EXPENSES 100
+typedef struct {
+    char description[100];
+    float amount;
+    char category[50];
+    char date[12];
+} Expense;
+
+Expense expenses[MAX_EXPENSES];
+int expense_count = 0;
+
+// Function prototypes
+//static void on_realize(GtkWidget *widget, gpointer data);
+void on_exit_button_clicked(GtkWidget *widget, gpointer data);
+void show_main_window();
+void show_login_window();
+gboolean load_app(gpointer data);
+void login(GtkWidget *widget, gpointer data);
+void open_expense_window(const char *title);
+void on_create_button_clicked(GtkWidget *widget, gpointer data) {
+    open_expense_window("Create Expense");
+}
+
+
+void on_add_button_clicked(GtkWidget *widget, gpointer data) {
+    open_expense_window("Add Expense");
+}
+
+void open_expense_window(const char *title) {
+    GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(window), title);
+    gtk_window_set_default_size(GTK_WINDOW(window), 300, 200);  // Adjusted window size
+    gtk_container_set_border_width(GTK_CONTAINER(window), 10);
+
+    // Create a grid for layout
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(window), grid);
+
+    // Create input fields
+    GtkWidget *entry_desc = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_desc), "Description");
+    gtk_grid_attach(GTK_GRID(grid), entry_desc, 0, 0, 2, 1);
+
+    GtkWidget *entry_amount = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_amount), "Amount");
+    gtk_grid_attach(GTK_GRID(grid), entry_amount, 0, 1, 2, 1);
+
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_category), "Category");
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 0, 2, 2, 1);
+
+    GtkWidget *entry_date = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_date), "Date (DD/MM/YYYY)");
+    gtk_grid_attach(GTK_GRID(grid), entry_date, 0, 3, 2, 1);
+
+    // Add a Save button
+    GtkWidget *button_save = gtk_button_new_with_label("Save");
+    gtk_grid_attach(GTK_GRID(grid), button_save, 0, 4, 1, 1);
+
+    // Add a Cancel button
+    GtkWidget *button_cancel = gtk_button_new_with_label("Cancel");
+    g_signal_connect(button_cancel, "clicked", G_CALLBACK(gtk_widget_destroy), window);
+    gtk_grid_attach(GTK_GRID(grid), button_cancel, 1, 4, 1, 1);
+
+    // Show the window and all child widgets
+    g_signal_connect(window, "destroy", G_CALLBACK(gtk_widget_destroy), NULL);
+    gtk_widget_show_all(window);
+}
+// File handling prototypes
+void load_expenses_from_file();
+void save_expenses_to_file();
+
+// Main functionality functions
+//void create_expense(GtkWidget *widget, gpointer data);
+void add_expense(GtkWidget *widget, gpointer data);
+void update_expense(GtkWidget *widget, gpointer data);
+void delete_expense(GtkWidget *widget, gpointer data);
+void view_all_expenses(GtkWidget *widget, gpointer data);
+void view_by_category(GtkWidget *widget, gpointer data);
+void view_total(GtkWidget *widget, gpointer data);
+//void create_record(GtkWidget *widget, gpointer data);
+void delete_by_description(GtkWidget *widget, gpointer data);
+void save_updated_expense(GtkWidget *widget, gpointer entry_description);
+void view_expenses_by_category(GtkWidget *widget, gpointer entry_category);
+void write_expense_to_file();
+void save_expense(GtkWidget *widget, gpointer data);
+
+// Main function
+int main(int argc, char *argv[]) {
+    gtk_init(&argc, &argv);
+
+    // Load expenses from file
+    load_expenses_from_file();
+
+    // Create the loading window
+    loading_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(loading_window), "Loading...");
+    gtk_window_set_default_size(GTK_WINDOW(loading_window), 400, 300);
+    gtk_container_set_border_width(GTK_CONTAINER(loading_window), 10);
+
+    // Center the loading window
+    GtkWindow *window = GTK_WINDOW(loading_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 300) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a vertical box for the layout
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(loading_window), vbox);
+
+    // Add the image to the loading window
+    GtkWidget *image = gtk_image_new_from_file("/Users/himanshi/Desktop/untitled_folder/logo.jpg");
+
+    // Check if the image loaded successfully
+    if (!image) {
+        g_message("Error: Image not found!");
+        GtkWidget *error_label = gtk_label_new("Error: Image not found!");
+        gtk_box_pack_start(GTK_BOX(vbox), error_label, TRUE, TRUE, 0);
+    } else {
+        g_message("Image loaded successfully");
+        gtk_box_pack_start(GTK_BOX(vbox), image, TRUE, TRUE, 0);
+    }
+
+    // Add the initial message with custom font and color
+    GtkWidget *initial_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(initial_label),
+        "<span font_desc='Cursive Bold 24' foreground='blue'>Welcome to the Expense Tracker!</span>");
+    gtk_box_pack_start(GTK_BOX(vbox), initial_label, FALSE, FALSE, 0);
+
+    // Create a progress bar to show loading
+    progress_bar = gtk_progress_bar_new();
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar), 0.0); // Set initial progress to 0%
+    gtk_widget_set_size_request(progress_bar, 300, 30);  // Shorter width, thicker height
+    gtk_box_pack_start(GTK_BOX(vbox), progress_bar, FALSE, FALSE, 0);
+
+    // Add the "Loading, please wait..." message
+    GtkWidget *loading_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(loading_label),
+        "<span font_desc='Serif Bold 18' foreground='darkgreen'>Loading, please wait...</span>");
+    gtk_box_pack_start(GTK_BOX(vbox), loading_label, FALSE, FALSE, 0);
+
+    g_signal_connect(loading_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    gtk_widget_show_all(loading_window);
+
+    // Simulate the loading process using a timer
+    g_timeout_add(100, load_app, NULL); // Call load_app every 100 ms to update the progress
+
+    gtk_main();
+
+    return 0;
+}
+
+// Simulate a long-running task
+gboolean load_app(gpointer data) {
+    static double progress = 0.0;
+
+    // Simulate loading for 3 seconds (adjust as needed)
+    progress += 0.02;  // Increment the progress by 2% every call
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar), progress); // Update the progress bar
+
+    // If progress is 100%, transition to the login window
+    if (progress >= 1.0) {
+        g_message("Progress is 100%%. Transitioning to the login window.");
+        gtk_widget_hide(loading_window); // Hide the loading window
+        show_login_window();
+        return FALSE;  // Stop calling this function
+    }
+
+    return TRUE;  // Continue updating the progress bar
+}
+
+// Show the login window
+void show_login_window() {
+    GtkWidget *login_window;
+
+    // Create the login window
+    login_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(login_window), "Login");
+    gtk_window_set_default_size(GTK_WINDOW(login_window), 400, 400);
+    gtk_container_set_border_width(GTK_CONTAINER(login_window), 10);
+    gtk_window_set_position(GTK_WINDOW(login_window), GTK_WIN_POS_CENTER);
+
+    // Create a vertical box layout
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(login_window), vbox);
+
+    // Add an animated GIF
+    GtkWidget *animation = gtk_image_new_from_file("/Users/himanshi/Desktop/unt_2/im67.gif");
+    gtk_box_pack_start(GTK_BOX(vbox), animation, FALSE, FALSE, 0);
+
+    // Add a label
+    GtkWidget *label_message = gtk_label_new("Login to Your Account");
+    gtk_box_pack_start(GTK_BOX(vbox), label_message, FALSE, FALSE, 0);
+
+    // Add username entry
+    entry_username = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_username), "Username");
+    gtk_box_pack_start(GTK_BOX(vbox), entry_username, FALSE, FALSE, 0);
+
+    // Add password entry
+    entry_password = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_password), "Password");
+    gtk_entry_set_visibility(GTK_ENTRY(entry_password), FALSE);
+    gtk_box_pack_start(GTK_BOX(vbox), entry_password, FALSE, FALSE, 0);
+
+    // Add login button
+    GtkWidget *button_login = gtk_button_new_with_label("Login");
+    g_signal_connect(button_login, "clicked", G_CALLBACK(login), NULL);
+    gtk_box_pack_start(GTK_BOX(vbox), button_login, FALSE, FALSE, 0);
+
+    // Connect destroy signal
+    g_signal_connect(login_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    // Show all widgets
+    gtk_widget_show_all(login_window);
+}
+void login(GtkWidget *widget, gpointer data) {
+    const char *username = gtk_entry_get_text(GTK_ENTRY(entry_username));
+    const char *password = gtk_entry_get_text(GTK_ENTRY(entry_password));
+
+    if (strcmp(username, "admin") == 0 && strcmp(password, "admin@123") == 0) {
+        gtk_widget_hide(login_window);
+        show_main_window();
+        g_message("Login successful, showing main window.");
+    } else {
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(login_window),
+                                                   GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                   GTK_MESSAGE_ERROR,
+                                                   GTK_BUTTONS_CLOSE,
+                                                   "Invalid login credentials!");
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+    }
+}
+void show_main_window() {
+    // Create the main window with updated size
+    main_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(main_window), "Expense Tracker");
+    gtk_window_set_default_size(GTK_WINDOW(main_window), 500, 600);  // Increased window size to accommodate the GIF
+    gtk_container_set_border_width(GTK_CONTAINER(main_window), 10);
+
+    // Change the background color of the main window to light blue
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(main_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the main window on the screen
+    GtkWindow *window = GTK_WINDOW(main_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 500) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 600) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a grid for layout
+    GtkWidget *grid = gtk_grid_new();
+    gtk_container_add(GTK_CONTAINER(main_window), grid);
+
+    // Set equal spacing for rows and columns
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);  // Set equal spacing between columns
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 20);     // Increased row spacing for more space between buttons
+
+    // Make buttons longer to fill the width of the window
+    GtkWidget *button_add = gtk_button_new_with_label("Add Expense");
+    g_signal_connect(button_add, "clicked", G_CALLBACK(add_expense), NULL);
+    gtk_widget_set_size_request(button_add, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_add, 0, 0, 2, 1);  // Attach button to grid
+
+    GtkWidget *button_update = gtk_button_new_with_label("Update Expense");
+    g_signal_connect(button_update, "clicked", G_CALLBACK(update_expense), NULL);
+    gtk_widget_set_size_request(button_update, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_update, 0, 1, 2, 1);
+
+    GtkWidget *button_delete = gtk_button_new_with_label("Delete Expense");
+    g_signal_connect(button_delete, "clicked", G_CALLBACK(delete_expense), NULL);
+    gtk_widget_set_size_request(button_delete, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_delete, 0, 2, 2, 1);
+
+    GtkWidget *button_view_all = gtk_button_new_with_label("View All Expenses");
+    g_signal_connect(button_view_all, "clicked", G_CALLBACK(view_all_expenses), NULL);
+    gtk_widget_set_size_request(button_view_all, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_view_all, 0, 3, 2, 1);
+
+    GtkWidget *button_view_category = gtk_button_new_with_label("View By Category");
+    g_signal_connect(button_view_category, "clicked", G_CALLBACK(view_by_category), NULL);
+    gtk_widget_set_size_request(button_view_category, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_view_category, 0, 4, 2, 1);
+
+    GtkWidget *button_view_total = gtk_button_new_with_label("View Total");
+    g_signal_connect(button_view_total, "clicked", G_CALLBACK(view_total), NULL);
+    gtk_widget_set_size_request(button_view_total, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_view_total, 0, 5, 2, 1);
+
+    // Add Exit button
+    GtkWidget *button_exit = gtk_button_new_with_label("Exit");
+    g_signal_connect(button_exit, "clicked", G_CALLBACK(on_exit_button_clicked), NULL);  // Call exit function
+    gtk_widget_set_size_request(button_exit, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_exit, 0, 6, 2, 1);
+
+    // Load the GIF (below all buttons)
+    GtkWidget *gif = gtk_image_new_from_file("/Users/himanshi/Desktop/unt_2/im5.gif");  // Replace with the path to your GIF file
+    gtk_widget_set_size_request(gif, 480, 100);  // Adjust size of the GIF (optional)
+    gtk_grid_attach(GTK_GRID(grid), gif, 0, 7, 2, 1);  // Attach GIF below buttons
+
+    // Show the main window
+    g_signal_connect(main_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    gtk_widget_show_all(main_window);
+}
+void on_exit_button_clicked(GtkWidget *widget, gpointer data) {
+    // Create a dialog box to display the message
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(main_window),
+                                               GTK_DIALOG_MODAL,
+                                               GTK_MESSAGE_INFO,
+                                               GTK_BUTTONS_OK,
+                                               "THANKS FOR VISITING");
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);  // Close the dialog after the user clicks OK
+    gtk_main_quit();  // Close the main window
+}
+
+void load_expenses_from_file() {
+    FILE *file = fopen(FILE_PATH, "r");
+    if (!file) {
+        g_message("No existing expense file found. Starting fresh.");
+        return;
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        char description[100], category[50], date[12];
+        float amount;
+
+        if (sscanf(line, "%99[^,],%f,%49[^,],%11[^\n]", description, &amount, category, date) == 4) {
+            strncpy(expenses[expense_count].description, description, sizeof(expenses[expense_count].description));
+            expenses[expense_count].amount = amount;
+            strncpy(expenses[expense_count].category, category, sizeof(expenses[expense_count].category));
+            strncpy(expenses[expense_count].date, date, sizeof(expenses[expense_count].date));
+            expense_count++;
+        }
+    }
+
+    fclose(file);
+}
+
+// Function to save the updated expenses list back to the file
+void save_expenses_to_file() {
+    FILE *file = fopen(FILE_PATH, "w");
+    if (file != NULL) {
+        for (int i = 0; i < expense_count; i++) {
+            fprintf(file, "%s %.2f %s %s\n", expenses[i].description, expenses[i].amount,
+                    expenses[i].category, expenses[i].date);
+        }
+        fclose(file);
+    }
+}
+
+// Function to handle the "Delete Expense" button click
+void delete_expense(GtkWidget *widget, gpointer data) {
+    // Create a new window for deleting an expense
+    GtkWidget *delete_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(delete_window), "Delete Expense");
+    gtk_window_set_default_size(GTK_WINDOW(delete_window), 400, 200);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(delete_window), 10);
+
+    // Change the background color of the delete window to light blue
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(delete_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(delete_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 200) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a grid layout for the delete window
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(delete_window), grid);
+
+    // Add a label and entry field for entering the description of the expense to delete
+    GtkWidget *label_desc = gtk_label_new("Enter Description to Delete:");
+    gtk_grid_attach(GTK_GRID(grid), label_desc, 0, 0, 1, 1);
+    
+    GtkWidget *entry_desc_delete = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_desc_delete, 0, 1, 1, 1);
+
+    // Create a "Delete" button
+    GtkWidget *button_delete = gtk_button_new_with_label("Delete Expense");
+    gtk_grid_attach(GTK_GRID(grid), button_delete, 0, 2, 1, 1);
+
+    // Connect the "Delete Expense" button to the delete function
+    g_signal_connect(button_delete, "clicked", G_CALLBACK(delete_by_description), entry_desc_delete);
+
+    // Add a back button to close the delete window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), delete_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 1, 2, 1, 1);
+
+    // Show the window
+    gtk_widget_show_all(delete_window);
+}
+// Function to delete the expense by description
+void delete_by_description(GtkWidget *widget, gpointer data) {
+    // Get the description entered by the user
+    const gchar *description = gtk_entry_get_text(GTK_ENTRY(data));
+
+    // Find the index of the expense to delete
+    int index_to_delete = -1;
+    for (int i = 0; i < expense_count; i++) {
+        if (g_strcmp0(expenses[i].description, description) == 0) {
+            index_to_delete = i;
+            break;
+        }
+    }
+
+    // Create a new window for the message
+    GtkWidget *message_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_default_size(GTK_WINDOW(message_window), 300, 100);
+    gtk_container_set_border_width(GTK_CONTAINER(message_window), 10);
+
+    // Create a vertical box layout
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(message_window), vbox);
+
+    if (index_to_delete != -1) {
+        // Shift all the expenses after the deleted one to the left
+        for (int i = index_to_delete; i < expense_count - 1; i++) {
+            expenses[i] = expenses[i + 1];
+        }
+
+        // Decrease the expense count
+        expense_count--;
+
+        // Save the updated expenses back to the file
+        save_expenses_to_file();
+
+        // Set up the success message
+        gtk_window_set_title(GTK_WINDOW(message_window), "Success");
+        GtkWidget *label = gtk_label_new("Expense Deleted Successfully!");
+        gtk_box_pack_start(GTK_BOX(vbox), label, TRUE, TRUE, 0);
+    } else {
+        // Set up the warning message
+        gtk_window_set_title(GTK_WINDOW(message_window), "Warning");
+        GtkWidget *label = gtk_label_new("Expense Not Found!");
+        gtk_box_pack_start(GTK_BOX(vbox), label, TRUE, TRUE, 0);
+    }
+
+    // Add an "OK" button
+    GtkWidget *ok_button = gtk_button_new_with_label("OK");
+    gtk_box_pack_start(GTK_BOX(vbox), ok_button, FALSE, FALSE, 0);
+
+    // Connect the "OK" button to close the message window
+    g_signal_connect(ok_button, "clicked", G_CALLBACK(gtk_widget_destroy), message_window);
+
+    // Show the message window
+    gtk_widget_show_all(message_window);
+}
+// Function to handle the "View All Expenses" button click
+void view_all_expenses(GtkWidget *widget, gpointer data) {
+    // Create a new window for viewing all expenses
+    GtkWidget *view_all_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(view_all_window), "All Expenses");
+    gtk_window_set_default_size(GTK_WINDOW(view_all_window), 400, 300); // Adjusted smaller window size
+    gtk_container_set_border_width(GTK_CONTAINER(view_all_window), 10);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(view_all_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 300) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a fixed container for layering widgets
+    GtkWidget *fixed = gtk_fixed_new();
+    gtk_container_add(GTK_CONTAINER(view_all_window), fixed);
+
+    // Apply a light blue background using CSS
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { background-color: lightblue; }", -1, NULL);
+    GtkStyleContext *style_context = gtk_widget_get_style_context(view_all_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    // Create a grid layout for displaying the expenses and the back button
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_widget_set_halign(grid, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(grid, GTK_ALIGN_CENTER);
+    gtk_fixed_put(GTK_FIXED(fixed), grid, 0, 0);
+
+    // Create a text view to display all the expenses
+    GtkWidget *text_view = gtk_text_view_new();
+    gtk_widget_set_size_request(text_view, 350, 180); // Adjusted smaller size
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+
+    // Populate the text view with all expense records
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_offset(buffer, &iter, 0); // Start at the beginning of the text buffer
+    for (int i = 0; i < expense_count; i++) {
+        gchar *expense_info = g_strdup_printf(
+            "Description: %s\nAmount: %.2f\nCategory: %s\nDate: %s\n\n",
+            expenses[i].description, expenses[i].amount, expenses[i].category, expenses[i].date
+        );
+        gtk_text_buffer_insert(buffer, &iter, expense_info, -1);
+        g_free(expense_info);
+    }
+
+    // Add the text view to the grid
+    gtk_grid_attach(GTK_GRID(grid), text_view, 0, 0, 2, 1);
+
+    // Create a back button to close the "View All Expenses" window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), view_all_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 1, 2, 1);
+
+    // Show the window with all expenses
+    gtk_widget_show_all(view_all_window);
+}
+// Function to handle the "Update Expense" button click
+typedef struct {
+    GtkWidget *entry_description;
+    GtkWidget *entry_amount;
+    GtkWidget *entry_category;
+    GtkWidget *entry_date;
+} ExpenseUpdateData;
+void update_expense(GtkWidget *widget, gpointer user_data) {
+    // Create a new window for updating expense details
+    GtkWidget *update_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(update_window), "Update Expense");
+    gtk_window_set_default_size(GTK_WINDOW(update_window), 350, 250);  // Adjust window size (reduce to fit content)
+    gtk_container_set_border_width(GTK_CONTAINER(update_window), 5);  // Reduce the border width
+
+    // Change the background color of the window to light blue (optional)
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(update_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(update_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 350) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 250) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a grid layout for displaying input fields and buttons
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);  // Reduce column spacing
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);  // Reduce row spacing
+    gtk_container_add(GTK_CONTAINER(update_window), grid);
+
+    // Create an entry for entering the description of the expense to update
+    GtkWidget *entry_description = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_description), "Enter Description to Update");
+    gtk_grid_attach(GTK_GRID(grid), entry_description, 0, 0, 2, 1);
+    gtk_widget_set_size_request(entry_description, 300, 30);  // Set a fixed size for the entry
+
+    // Create an entry for entering the new amount
+    GtkWidget *entry_amount = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_amount), "New Amount");
+    gtk_grid_attach(GTK_GRID(grid), entry_amount, 0, 1, 2, 1);
+    gtk_widget_set_size_request(entry_amount, 300, 30);  // Set a fixed size for the entry
+
+    // Create an entry for entering the new category
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_category), "New Category");
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 0, 2, 2, 1);
+    gtk_widget_set_size_request(entry_category, 300, 30);  // Set a fixed size for the entry
+
+    // Create an entry for entering the new date
+    GtkWidget *entry_date = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_date), "New Date (DD/MM/YYYY)");
+    gtk_grid_attach(GTK_GRID(grid), entry_date, 0, 3, 2, 1);
+    gtk_widget_set_size_request(entry_date, 300, 30);  // Set a fixed size for the entry
+
+    // Create a button to save the updated expense
+    GtkWidget *button_update = gtk_button_new_with_label("Update Expense");
+    gtk_grid_attach(GTK_GRID(grid), button_update, 0, 4, 2, 1);
+    gtk_widget_set_size_request(button_update, 300, 40);  // Set a fixed size for the button
+
+    // Prepare the struct to pass to the signal handler
+    ExpenseUpdateData *update_data = g_malloc(sizeof(ExpenseUpdateData));
+    update_data->entry_description = entry_description;
+    update_data->entry_amount = entry_amount;
+    update_data->entry_category = entry_category;
+    update_data->entry_date = entry_date;
+
+    // Connect the button to save the updated expense
+    g_signal_connect(button_update, "clicked", G_CALLBACK(save_updated_expense), update_data);
+
+    // Create the "Back" button to close the window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), update_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 5, 2, 1);
+    gtk_widget_set_size_request(button_back, 300, 40);  // Set a fixed size for the button
+
+    // Show the update window
+    gtk_widget_show_all(update_window);
+}
+void save_updated_expense(GtkWidget *widget, gpointer data) {
+    // Cast data to the custom struct containing all the entry widgets
+    ExpenseUpdateData *update_data = (ExpenseUpdateData *)data;
+
+    const gchar *description = gtk_entry_get_text(GTK_ENTRY(update_data->entry_description));
+
+    // Search for the expense in the structure based on the description
+    gboolean found = FALSE;
+    for (int i = 0; i < expense_count; i++) {
+        if (g_strcmp0(expenses[i].description, description) == 0) {
+            // If found, prompt the user for the new details
+            const gchar *new_amount_str = gtk_entry_get_text(GTK_ENTRY(update_data->entry_amount));
+            const gchar *new_category = gtk_entry_get_text(GTK_ENTRY(update_data->entry_category));
+            const gchar *new_date = gtk_entry_get_text(GTK_ENTRY(update_data->entry_date));
+
+            // Update the expense details
+            expenses[i].amount = atof(new_amount_str);
+            strncpy(expenses[i].category, new_category, sizeof(expenses[i].category) - 1);
+            strncpy(expenses[i].date, new_date, sizeof(expenses[i].date) - 1);
+
+            // Save the updated expense back to the file
+            save_expenses_to_file();
+
+            found = TRUE;
+            break;
+        }
+    }
+
+    // Create a message to display (add a label if necessary)
+    GtkWidget *label_message = GTK_WIDGET(data);  // Assuming this is used to display the message
+    if (found) {
+        gtk_label_set_text(GTK_LABEL(label_message), "Expense updated successfully.");
+    } else {
+        gtk_label_set_text(GTK_LABEL(label_message), "Expense with this description not found.");
+    }
+
+    // Free the allocated memory for the update data
+    g_free(update_data);
+}
+// Function to handle the "View By Category" button click
+void view_by_category(GtkWidget *widget, gpointer data) {
+    // Create a new window for viewing expenses by category
+    GtkWidget *category_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(category_window), "Expenses By Category");
+    gtk_window_set_default_size(GTK_WINDOW(category_window), 350, 250);  // Reduce window size to fit content better
+    gtk_container_set_border_width(GTK_CONTAINER(category_window), 10);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(category_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        // Calculate the position based on the monitor geometry
+        int x = monitor_geometry.x + (monitor_geometry.width - 350) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 250) / 2; // Center vertically
+        gtk_window_move(window, x, y); // Move the window to the calculated position
+    }
+
+    // Apply a light blue background using CSS
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { background-color: lightblue; }", -1, NULL);
+    GtkStyleContext *style_context = gtk_widget_get_style_context(category_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    // Create a fixed container for layering widgets
+    GtkWidget *fixed = gtk_fixed_new();
+    gtk_container_add(GTK_CONTAINER(category_window), fixed);
+
+    // Create a grid layout for displaying category input and expenses
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_widget_set_halign(grid, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(grid, GTK_ALIGN_CENTER);
+    gtk_fixed_put(GTK_FIXED(fixed), grid, 0, 0);
+
+    // Create an entry for entering the category name
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_category), "Enter Category");
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 0, 0, 2, 1);
+
+    // Create a button to submit the category and view expenses
+    GtkWidget *button_view = gtk_button_new_with_label("View Expenses");
+    g_signal_connect(button_view, "clicked", G_CALLBACK(view_expenses_by_category), entry_category);
+    gtk_widget_set_hexpand(button_view, TRUE);  // Allow the button to expand horizontally
+    gtk_grid_attach(GTK_GRID(grid), button_view, 0, 1, 2, 1);
+
+    // Create the "Back" button to close the window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), category_window);
+    gtk_widget_set_hexpand(button_back, TRUE);  // Allow the button to expand horizontally
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 2, 2, 1);
+
+    // Show the category window
+    gtk_widget_show_all(category_window);
+}
+// Function to display expenses for the given category
+void view_expenses_by_category(GtkWidget *widget, gpointer entry_category) {
+    const gchar *category = gtk_entry_get_text(GTK_ENTRY(entry_category));
+
+    // Create a new window to show the expenses of the selected category
+    GtkWidget *expense_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(expense_window), "Expenses in Category");
+    gtk_window_set_default_size(GTK_WINDOW(expense_window), 400, 300);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(expense_window), 10);
+
+    // Change the background color of the window to light blue
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(expense_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(expense_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        // Calculate the position based on the monitor geometry
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 300) / 2; // Center vertically
+        gtk_window_move(window, x, y); // Move the window to the calculated position
+    }
+
+    // Create a grid layout to display expenses
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(expense_window), grid);
+
+    // Iterate through all expenses and display those that match the category
+    gboolean category_found = FALSE;
+    for (int i = 0; i < expense_count; i++) {
+        if (g_strcmp0(expenses[i].category, category) == 0) {
+            category_found = TRUE;
+
+            // Create a label to display the expense details
+            char expense_details[200];
+            snprintf(expense_details, sizeof(expense_details), "Description: %s\nAmount: %.2f\nDate: %s",
+                     expenses[i].description, expenses[i].amount, expenses[i].date);
+            GtkWidget *label = gtk_label_new(expense_details);
+            gtk_grid_attach(GTK_GRID(grid), label, 0, i, 1, 1);
+        }
+    }
+
+    if (!category_found) {
+        GtkWidget *label_no_expenses = gtk_label_new("No expenses found for this category.");
+        gtk_grid_attach(GTK_GRID(grid), label_no_expenses, 0, 0, 1, 1);
+    }
+
+    // Show the expense window
+    gtk_widget_show_all(expense_window);
+}
+// Function to handle the "View Total" button click
+void view_total(GtkWidget *widget, gpointer data) {
+    // Create a new window for viewing the total expenses
+    GtkWidget *total_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(total_window), "Total Expenses");
+    gtk_window_set_default_size(GTK_WINDOW(total_window), 300, 200);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(total_window), 10);
+    gtk_window_set_position(GTK_WINDOW(total_window), GTK_WIN_POS_CENTER); // Center the window on the screen
+
+    // Create a grid layout for displaying total and back button
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(total_window), grid);
+
+    // Calculate the total of all expenses
+    float total_expenses = 0;
+    for (int i = 0; i < expense_count; i++) {
+        total_expenses += expenses[i].amount;
+    }
+
+    // Display the total amount in the window
+    char total_text[100];
+    snprintf(total_text, sizeof(total_text), "Total Expenses: %.2f", total_expenses);
+    GtkWidget *label_total = gtk_label_new(total_text);
+    gtk_grid_attach(GTK_GRID(grid), label_total, 0, 0, 2, 1);
+
+    // Create the "Back" button to close the window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), total_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 1, 2, 1);
+
+    // Set the background image using GtkCssProvider
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { "
+        "   background-image: url('/Users/himanshi/Desktop/unt_2/im10.jpg'); "
+        "   background-size: cover; "
+        "   background-repeat: no-repeat; "
+        "   background-position: center; "
+        "}",
+        -1, NULL);
+
+    GtkStyleContext *style_context = gtk_widget_get_style_context(total_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    g_object_unref(css_provider); // Free the CSS provider after use
+
+    // Show the total window
+    gtk_widget_show_all(total_window);
+}
+void write_expense_to_file() {
+    FILE *file = fopen(FILE_PATH, "a");
+    if (file == NULL) {
+        GtkWidget *error_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                         "Error opening file!");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+        return;
+    }
+
+    for (int i = 0; i < expense_count; i++) {
+        fprintf(file, "%s,%f,%s,%s\n", expenses[i].description, expenses[i].amount, expenses[i].category, expenses[i].date);
+    }
+
+    fclose(file);
+}
+
+// Function to handle the creation of a new expense
+void add_expense(GtkWidget *widget, gpointer data) {
+    // Create a new window for adding an expense
+    GtkWidget *add_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(add_window), "Add Expense");
+    gtk_window_set_default_size(GTK_WINDOW(add_window), 300, 250);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(add_window), 10);
+    gtk_window_set_position(GTK_WINDOW(add_window), GTK_WIN_POS_CENTER); // Center the window on the screen
+
+    // Create a grid layout for input and buttons
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(add_window), grid);
+
+    // Label and Entry for description
+    GtkWidget *label_desc = gtk_label_new("Description:");
+    gtk_grid_attach(GTK_GRID(grid), label_desc, 0, 0, 1, 1);
+    GtkWidget *entry_desc = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_desc, 1, 0, 1, 1);
+
+    // Label and Entry for amount
+    GtkWidget *label_amount = gtk_label_new("Amount:");
+    gtk_grid_attach(GTK_GRID(grid), label_amount, 0, 1, 1, 1);
+    GtkWidget *entry_amount = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_amount, 1, 1, 1, 1);
+
+    // Label and Entry for category
+    GtkWidget *label_category = gtk_label_new("Category:");
+    gtk_grid_attach(GTK_GRID(grid), label_category, 0, 2, 1, 1);
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 1, 2, 1, 1);
+
+    // Label and Entry for date
+    GtkWidget *label_date = gtk_label_new("Date (DD/MM/YYYY):");
+    gtk_grid_attach(GTK_GRID(grid), label_date, 0, 3, 1, 1);
+    GtkWidget *entry_date = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_date, 1, 3, 1, 1);
+
+    // Create Button to save expense
+    GtkWidget *button_add = gtk_button_new_with_label("Add Expense");
+    gtk_grid_attach(GTK_GRID(grid), button_add, 0, 4, 2, 1);
+
+    // Create a list to store the entries
+    GList *entry_list = NULL;
+    entry_list = g_list_append(entry_list, entry_desc);
+    entry_list = g_list_append(entry_list, entry_amount);
+    entry_list = g_list_append(entry_list, entry_category);
+    entry_list = g_list_append(entry_list, entry_date);
+
+    // Connect the button to the function that will handle saving the expense
+    g_signal_connect(button_add, "clicked", G_CALLBACK(save_expense), entry_list);
+
+    // Set the background image using GtkCssProvider
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { "
+        "   background-image: url('/Users/himanshi/Desktop/unt_2/im3.gif'); "
+        "   background-size: cover; "
+        "   background-repeat: no-repeat; "
+        "   background-position: center; "
+        "}",
+        -1, NULL);
+
+    GtkStyleContext *style_context = gtk_widget_get_style_context(add_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    g_object_unref(css_provider); // Free the CSS provider after use
+
+    // Show the add window
+    g_signal_connect(add_window, "destroy", G_CALLBACK(gtk_widget_destroy), NULL);
+    gtk_widget_show_all(add_window);
+}
+// Function to save the entered expense to file and structure
+void save_expense(GtkWidget *widget, gpointer data) {
+    GList *entries = (GList *)data;
+
+    GtkWidget *entry_desc = GTK_WIDGET(entries->data);
+    GtkWidget *entry_amount = GTK_WIDGET(entries->next->data);
+    GtkWidget *entry_category = GTK_WIDGET(entries->next->next->data);
+    GtkWidget *entry_date = GTK_WIDGET(entries->next->next->next->data);
+
+    // Get the entered data
+    const char *desc = gtk_entry_get_text(GTK_ENTRY(entry_desc));
+    const char *amount_text = gtk_entry_get_text(GTK_ENTRY(entry_amount));
+    const char *category = gtk_entry_get_text(GTK_ENTRY(entry_category));
+    const char *date = gtk_entry_get_text(GTK_ENTRY(entry_date));
+
+    // Validate the fields
+    if (*desc == '\0' || *amount_text == '\0' || *category == '\0' || *date == '\0') {
+        GtkWidget *error_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                         "Please fill in all the fields!");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+        return;
+    }
+
+    // Validate amount
+    float amount = atof(amount_text);  // Convert amount to float
+    if (amount <= 0) {
+        GtkWidget *error_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                         "Please enter a valid amount!");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+        return;
+    }
+
+    // Add the expense to the structure
+    strcpy(expenses[expense_count].description, desc);
+    expenses[expense_count].amount = amount;
+    strcpy(expenses[expense_count].category, category);
+    strcpy(expenses[expense_count].date, date);
+    expense_count++;
+
+    // Write the new expense to the file
+    write_expense_to_file();
+
+    // Show success message
+    GtkWidget *success_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                                                       "Expense added successfully!");
+    gtk_dialog_run(GTK_DIALOG(success_dialog));
+    gtk_widget_destroy(success_dialog);
+
+    // Close the add window
+    gtk_widget_destroy(gtk_widget_get_toplevel(widget));
+}#include <gtk/gtk.h>
+#include <string.h>  // For strcmp()
+#include <stdlib.h>  // For atof() and atoi()
+#include <stdio.h>   // For file handling
+
+// File to store expenses
+#define FILE_PATH "expense_track.txt"
+
+// Global pointers to manage windows
+GtkWidget *loading_window = NULL;
+GtkWidget *main_window = NULL;
+GtkWidget *login_window = NULL;
+GtkWidget *progress_bar = NULL;  // Progress bar widget
+
+// Entry widgets for login
+GtkWidget *entry_username, *entry_password;
+
+// Entry widgets for the main window
+GtkWidget *entry_desc, *entry_amount, *entry_category, *entry_date, *entry_delete, *entry_category_view;
+GtkWidget *text_view; // Text view to display expenses
+
+// Expense structure and array
+#define MAX_EXPENSES 100
+typedef struct {
+    char description[100];
+    float amount;
+    char category[50];
+    char date[12];
+} Expense;
+
+Expense expenses[MAX_EXPENSES];
+int expense_count = 0;
+
+// Function prototypes
+//static void on_realize(GtkWidget *widget, gpointer data);
+void on_exit_button_clicked(GtkWidget *widget, gpointer data);
+void show_main_window();
+void show_login_window();
+gboolean load_app(gpointer data);
+void login(GtkWidget *widget, gpointer data);
+void open_expense_window(const char *title);
+void on_create_button_clicked(GtkWidget *widget, gpointer data) {
+    open_expense_window("Create Expense");
+}
+
+
+void on_add_button_clicked(GtkWidget *widget, gpointer data) {
+    open_expense_window("Add Expense");
+}
+
+void open_expense_window(const char *title) {
+    GtkWidget *window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(window), title);
+    gtk_window_set_default_size(GTK_WINDOW(window), 300, 200);  // Adjusted window size
+    gtk_container_set_border_width(GTK_CONTAINER(window), 10);
+
+    // Create a grid for layout
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(window), grid);
+
+    // Create input fields
+    GtkWidget *entry_desc = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_desc), "Description");
+    gtk_grid_attach(GTK_GRID(grid), entry_desc, 0, 0, 2, 1);
+
+    GtkWidget *entry_amount = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_amount), "Amount");
+    gtk_grid_attach(GTK_GRID(grid), entry_amount, 0, 1, 2, 1);
+
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_category), "Category");
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 0, 2, 2, 1);
+
+    GtkWidget *entry_date = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_date), "Date (DD/MM/YYYY)");
+    gtk_grid_attach(GTK_GRID(grid), entry_date, 0, 3, 2, 1);
+
+    // Add a Save button
+    GtkWidget *button_save = gtk_button_new_with_label("Save");
+    gtk_grid_attach(GTK_GRID(grid), button_save, 0, 4, 1, 1);
+
+    // Add a Cancel button
+    GtkWidget *button_cancel = gtk_button_new_with_label("Cancel");
+    g_signal_connect(button_cancel, "clicked", G_CALLBACK(gtk_widget_destroy), window);
+    gtk_grid_attach(GTK_GRID(grid), button_cancel, 1, 4, 1, 1);
+
+    // Show the window and all child widgets
+    g_signal_connect(window, "destroy", G_CALLBACK(gtk_widget_destroy), NULL);
+    gtk_widget_show_all(window);
+}
+// File handling prototypes
+void load_expenses_from_file();
+void save_expenses_to_file();
+
+// Main functionality functions
+//void create_expense(GtkWidget *widget, gpointer data);
+void add_expense(GtkWidget *widget, gpointer data);
+void update_expense(GtkWidget *widget, gpointer data);
+void delete_expense(GtkWidget *widget, gpointer data);
+void view_all_expenses(GtkWidget *widget, gpointer data);
+void view_by_category(GtkWidget *widget, gpointer data);
+void view_total(GtkWidget *widget, gpointer data);
+//void create_record(GtkWidget *widget, gpointer data);
+void delete_by_description(GtkWidget *widget, gpointer data);
+void save_updated_expense(GtkWidget *widget, gpointer entry_description);
+void view_expenses_by_category(GtkWidget *widget, gpointer entry_category);
+void write_expense_to_file();
+void save_expense(GtkWidget *widget, gpointer data);
+
+// Main function
+int main(int argc, char *argv[]) {
+    gtk_init(&argc, &argv);
+
+    // Load expenses from file
+    load_expenses_from_file();
+
+    // Create the loading window
+    loading_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(loading_window), "Loading...");
+    gtk_window_set_default_size(GTK_WINDOW(loading_window), 400, 300);
+    gtk_container_set_border_width(GTK_CONTAINER(loading_window), 10);
+
+    // Center the loading window
+    GtkWindow *window = GTK_WINDOW(loading_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 300) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a vertical box for the layout
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(loading_window), vbox);
+
+    // Add the image to the loading window
+    GtkWidget *image = gtk_image_new_from_file("/Users/himanshi/Desktop/untitled_folder/logo.jpg");
+
+    // Check if the image loaded successfully
+    if (!image) {
+        g_message("Error: Image not found!");
+        GtkWidget *error_label = gtk_label_new("Error: Image not found!");
+        gtk_box_pack_start(GTK_BOX(vbox), error_label, TRUE, TRUE, 0);
+    } else {
+        g_message("Image loaded successfully");
+        gtk_box_pack_start(GTK_BOX(vbox), image, TRUE, TRUE, 0);
+    }
+
+    // Add the initial message with custom font and color
+    GtkWidget *initial_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(initial_label),
+        "<span font_desc='Cursive Bold 24' foreground='blue'>Welcome to the Expense Tracker!</span>");
+    gtk_box_pack_start(GTK_BOX(vbox), initial_label, FALSE, FALSE, 0);
+
+    // Create a progress bar to show loading
+    progress_bar = gtk_progress_bar_new();
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar), 0.0); // Set initial progress to 0%
+    gtk_widget_set_size_request(progress_bar, 300, 30);  // Shorter width, thicker height
+    gtk_box_pack_start(GTK_BOX(vbox), progress_bar, FALSE, FALSE, 0);
+
+    // Add the "Loading, please wait..." message
+    GtkWidget *loading_label = gtk_label_new(NULL);
+    gtk_label_set_markup(GTK_LABEL(loading_label),
+        "<span font_desc='Serif Bold 18' foreground='darkgreen'>Loading, please wait...</span>");
+    gtk_box_pack_start(GTK_BOX(vbox), loading_label, FALSE, FALSE, 0);
+
+    g_signal_connect(loading_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    gtk_widget_show_all(loading_window);
+
+    // Simulate the loading process using a timer
+    g_timeout_add(100, load_app, NULL); // Call load_app every 100 ms to update the progress
+
+    gtk_main();
+
+    return 0;
+}
+
+// Simulate a long-running task
+gboolean load_app(gpointer data) {
+    static double progress = 0.0;
+
+    // Simulate loading for 3 seconds (adjust as needed)
+    progress += 0.02;  // Increment the progress by 2% every call
+    gtk_progress_bar_set_fraction(GTK_PROGRESS_BAR(progress_bar), progress); // Update the progress bar
+
+    // If progress is 100%, transition to the login window
+    if (progress >= 1.0) {
+        g_message("Progress is 100%%. Transitioning to the login window.");
+        gtk_widget_hide(loading_window); // Hide the loading window
+        show_login_window();
+        return FALSE;  // Stop calling this function
+    }
+
+    return TRUE;  // Continue updating the progress bar
+}
+
+// Show the login window
+void show_login_window() {
+    GtkWidget *login_window;
+
+    // Create the login window
+    login_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(login_window), "Login");
+    gtk_window_set_default_size(GTK_WINDOW(login_window), 400, 400);
+    gtk_container_set_border_width(GTK_CONTAINER(login_window), 10);
+    gtk_window_set_position(GTK_WINDOW(login_window), GTK_WIN_POS_CENTER);
+
+    // Create a vertical box layout
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(login_window), vbox);
+
+    // Add an animated GIF
+    GtkWidget *animation = gtk_image_new_from_file("/Users/himanshi/Desktop/unt_2/im67.gif");
+    gtk_box_pack_start(GTK_BOX(vbox), animation, FALSE, FALSE, 0);
+
+    // Add a label
+    GtkWidget *label_message = gtk_label_new("Login to Your Account");
+    gtk_box_pack_start(GTK_BOX(vbox), label_message, FALSE, FALSE, 0);
+
+    // Add username entry
+    entry_username = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_username), "Username");
+    gtk_box_pack_start(GTK_BOX(vbox), entry_username, FALSE, FALSE, 0);
+
+    // Add password entry
+    entry_password = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_password), "Password");
+    gtk_entry_set_visibility(GTK_ENTRY(entry_password), FALSE);
+    gtk_box_pack_start(GTK_BOX(vbox), entry_password, FALSE, FALSE, 0);
+
+    // Add login button
+    GtkWidget *button_login = gtk_button_new_with_label("Login");
+    g_signal_connect(button_login, "clicked", G_CALLBACK(login), NULL);
+    gtk_box_pack_start(GTK_BOX(vbox), button_login, FALSE, FALSE, 0);
+
+    // Connect destroy signal
+    g_signal_connect(login_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+
+    // Show all widgets
+    gtk_widget_show_all(login_window);
+}
+void login(GtkWidget *widget, gpointer data) {
+    const char *username = gtk_entry_get_text(GTK_ENTRY(entry_username));
+    const char *password = gtk_entry_get_text(GTK_ENTRY(entry_password));
+
+    if (strcmp(username, "admin") == 0 && strcmp(password, "admin@123") == 0) {
+        gtk_widget_hide(login_window);
+        show_main_window();
+        g_message("Login successful, showing main window.");
+    } else {
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(login_window),
+                                                   GTK_DIALOG_DESTROY_WITH_PARENT,
+                                                   GTK_MESSAGE_ERROR,
+                                                   GTK_BUTTONS_CLOSE,
+                                                   "Invalid login credentials!");
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+    }
+}
+void show_main_window() {
+    // Create the main window with updated size
+    main_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(main_window), "Expense Tracker");
+    gtk_window_set_default_size(GTK_WINDOW(main_window), 500, 600);  // Increased window size to accommodate the GIF
+    gtk_container_set_border_width(GTK_CONTAINER(main_window), 10);
+
+    // Change the background color of the main window to light blue
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(main_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the main window on the screen
+    GtkWindow *window = GTK_WINDOW(main_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 500) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 600) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a grid for layout
+    GtkWidget *grid = gtk_grid_new();
+    gtk_container_add(GTK_CONTAINER(main_window), grid);
+
+    // Set equal spacing for rows and columns
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);  // Set equal spacing between columns
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 20);     // Increased row spacing for more space between buttons
+
+    // Make buttons longer to fill the width of the window
+    GtkWidget *button_add = gtk_button_new_with_label("Add Expense");
+    g_signal_connect(button_add, "clicked", G_CALLBACK(add_expense), NULL);
+    gtk_widget_set_size_request(button_add, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_add, 0, 0, 2, 1);  // Attach button to grid
+
+    GtkWidget *button_update = gtk_button_new_with_label("Update Expense");
+    g_signal_connect(button_update, "clicked", G_CALLBACK(update_expense), NULL);
+    gtk_widget_set_size_request(button_update, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_update, 0, 1, 2, 1);
+
+    GtkWidget *button_delete = gtk_button_new_with_label("Delete Expense");
+    g_signal_connect(button_delete, "clicked", G_CALLBACK(delete_expense), NULL);
+    gtk_widget_set_size_request(button_delete, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_delete, 0, 2, 2, 1);
+
+    GtkWidget *button_view_all = gtk_button_new_with_label("View All Expenses");
+    g_signal_connect(button_view_all, "clicked", G_CALLBACK(view_all_expenses), NULL);
+    gtk_widget_set_size_request(button_view_all, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_view_all, 0, 3, 2, 1);
+
+    GtkWidget *button_view_category = gtk_button_new_with_label("View By Category");
+    g_signal_connect(button_view_category, "clicked", G_CALLBACK(view_by_category), NULL);
+    gtk_widget_set_size_request(button_view_category, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_view_category, 0, 4, 2, 1);
+
+    GtkWidget *button_view_total = gtk_button_new_with_label("View Total");
+    g_signal_connect(button_view_total, "clicked", G_CALLBACK(view_total), NULL);
+    gtk_widget_set_size_request(button_view_total, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_view_total, 0, 5, 2, 1);
+
+    // Add Exit button
+    GtkWidget *button_exit = gtk_button_new_with_label("Exit");
+    g_signal_connect(button_exit, "clicked", G_CALLBACK(on_exit_button_clicked), NULL);  // Call exit function
+    gtk_widget_set_size_request(button_exit, 480, 40);  // Set button width to fill the window
+    gtk_grid_attach(GTK_GRID(grid), button_exit, 0, 6, 2, 1);
+
+    // Load the GIF (below all buttons)
+    GtkWidget *gif = gtk_image_new_from_file("/Users/himanshi/Desktop/unt_2/im5.gif");  // Replace with the path to your GIF file
+    gtk_widget_set_size_request(gif, 480, 100);  // Adjust size of the GIF (optional)
+    gtk_grid_attach(GTK_GRID(grid), gif, 0, 7, 2, 1);  // Attach GIF below buttons
+
+    // Show the main window
+    g_signal_connect(main_window, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    gtk_widget_show_all(main_window);
+}
+void on_exit_button_clicked(GtkWidget *widget, gpointer data) {
+    // Create a dialog box to display the message
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(main_window),
+                                               GTK_DIALOG_MODAL,
+                                               GTK_MESSAGE_INFO,
+                                               GTK_BUTTONS_OK,
+                                               "THANKS FOR VISITING");
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);  // Close the dialog after the user clicks OK
+    gtk_main_quit();  // Close the main window
+}
+
+void load_expenses_from_file() {
+    FILE *file = fopen(FILE_PATH, "r");
+    if (!file) {
+        g_message("No existing expense file found. Starting fresh.");
+        return;
+    }
+
+    char line[256];
+    while (fgets(line, sizeof(line), file)) {
+        char description[100], category[50], date[12];
+        float amount;
+
+        if (sscanf(line, "%99[^,],%f,%49[^,],%11[^\n]", description, &amount, category, date) == 4) {
+            strncpy(expenses[expense_count].description, description, sizeof(expenses[expense_count].description));
+            expenses[expense_count].amount = amount;
+            strncpy(expenses[expense_count].category, category, sizeof(expenses[expense_count].category));
+            strncpy(expenses[expense_count].date, date, sizeof(expenses[expense_count].date));
+            expense_count++;
+        }
+    }
+
+    fclose(file);
+}
+
+// Function to save the updated expenses list back to the file
+void save_expenses_to_file() {
+    FILE *file = fopen(FILE_PATH, "w");
+    if (file != NULL) {
+        for (int i = 0; i < expense_count; i++) {
+            fprintf(file, "%s %.2f %s %s\n", expenses[i].description, expenses[i].amount,
+                    expenses[i].category, expenses[i].date);
+        }
+        fclose(file);
+    }
+}
+
+// Function to handle the "Delete Expense" button click
+void delete_expense(GtkWidget *widget, gpointer data) {
+    // Create a new window for deleting an expense
+    GtkWidget *delete_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(delete_window), "Delete Expense");
+    gtk_window_set_default_size(GTK_WINDOW(delete_window), 400, 200);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(delete_window), 10);
+
+    // Change the background color of the delete window to light blue
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(delete_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(delete_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 200) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a grid layout for the delete window
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(delete_window), grid);
+
+    // Add a label and entry field for entering the description of the expense to delete
+    GtkWidget *label_desc = gtk_label_new("Enter Description to Delete:");
+    gtk_grid_attach(GTK_GRID(grid), label_desc, 0, 0, 1, 1);
+    
+    GtkWidget *entry_desc_delete = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_desc_delete, 0, 1, 1, 1);
+
+    // Create a "Delete" button
+    GtkWidget *button_delete = gtk_button_new_with_label("Delete Expense");
+    gtk_grid_attach(GTK_GRID(grid), button_delete, 0, 2, 1, 1);
+
+    // Connect the "Delete Expense" button to the delete function
+    g_signal_connect(button_delete, "clicked", G_CALLBACK(delete_by_description), entry_desc_delete);
+
+    // Add a back button to close the delete window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), delete_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 1, 2, 1, 1);
+
+    // Show the window
+    gtk_widget_show_all(delete_window);
+}
+// Function to delete the expense by description
+void delete_by_description(GtkWidget *widget, gpointer data) {
+    // Get the description entered by the user
+    const gchar *description = gtk_entry_get_text(GTK_ENTRY(data));
+
+    // Find the index of the expense to delete
+    int index_to_delete = -1;
+    for (int i = 0; i < expense_count; i++) {
+        if (g_strcmp0(expenses[i].description, description) == 0) {
+            index_to_delete = i;
+            break;
+        }
+    }
+
+    // Create a new window for the message
+    GtkWidget *message_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_default_size(GTK_WINDOW(message_window), 300, 100);
+    gtk_container_set_border_width(GTK_CONTAINER(message_window), 10);
+
+    // Create a vertical box layout
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(message_window), vbox);
+
+    if (index_to_delete != -1) {
+        // Shift all the expenses after the deleted one to the left
+        for (int i = index_to_delete; i < expense_count - 1; i++) {
+            expenses[i] = expenses[i + 1];
+        }
+
+        // Decrease the expense count
+        expense_count--;
+
+        // Save the updated expenses back to the file
+        save_expenses_to_file();
+
+        // Set up the success message
+        gtk_window_set_title(GTK_WINDOW(message_window), "Success");
+        GtkWidget *label = gtk_label_new("Expense Deleted Successfully!");
+        gtk_box_pack_start(GTK_BOX(vbox), label, TRUE, TRUE, 0);
+    } else {
+        // Set up the warning message
+        gtk_window_set_title(GTK_WINDOW(message_window), "Warning");
+        GtkWidget *label = gtk_label_new("Expense Not Found!");
+        gtk_box_pack_start(GTK_BOX(vbox), label, TRUE, TRUE, 0);
+    }
+
+    // Add an "OK" button
+    GtkWidget *ok_button = gtk_button_new_with_label("OK");
+    gtk_box_pack_start(GTK_BOX(vbox), ok_button, FALSE, FALSE, 0);
+
+    // Connect the "OK" button to close the message window
+    g_signal_connect(ok_button, "clicked", G_CALLBACK(gtk_widget_destroy), message_window);
+
+    // Show the message window
+    gtk_widget_show_all(message_window);
+}
+// Function to handle the "View All Expenses" button click
+void view_all_expenses(GtkWidget *widget, gpointer data) {
+    // Create a new window for viewing all expenses
+    GtkWidget *view_all_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(view_all_window), "All Expenses");
+    gtk_window_set_default_size(GTK_WINDOW(view_all_window), 400, 300); // Adjusted smaller window size
+    gtk_container_set_border_width(GTK_CONTAINER(view_all_window), 10);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(view_all_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 300) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a fixed container for layering widgets
+    GtkWidget *fixed = gtk_fixed_new();
+    gtk_container_add(GTK_CONTAINER(view_all_window), fixed);
+
+    // Apply a light blue background using CSS
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { background-color: lightblue; }", -1, NULL);
+    GtkStyleContext *style_context = gtk_widget_get_style_context(view_all_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    // Create a grid layout for displaying the expenses and the back button
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_widget_set_halign(grid, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(grid, GTK_ALIGN_CENTER);
+    gtk_fixed_put(GTK_FIXED(fixed), grid, 0, 0);
+
+    // Create a text view to display all the expenses
+    GtkWidget *text_view = gtk_text_view_new();
+    gtk_widget_set_size_request(text_view, 350, 180); // Adjusted smaller size
+    GtkTextBuffer *buffer = gtk_text_view_get_buffer(GTK_TEXT_VIEW(text_view));
+
+    // Populate the text view with all expense records
+    GtkTextIter iter;
+    gtk_text_buffer_get_iter_at_offset(buffer, &iter, 0); // Start at the beginning of the text buffer
+    for (int i = 0; i < expense_count; i++) {
+        gchar *expense_info = g_strdup_printf(
+            "Description: %s\nAmount: %.2f\nCategory: %s\nDate: %s\n\n",
+            expenses[i].description, expenses[i].amount, expenses[i].category, expenses[i].date
+        );
+        gtk_text_buffer_insert(buffer, &iter, expense_info, -1);
+        g_free(expense_info);
+    }
+
+    // Add the text view to the grid
+    gtk_grid_attach(GTK_GRID(grid), text_view, 0, 0, 2, 1);
+
+    // Create a back button to close the "View All Expenses" window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), view_all_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 1, 2, 1);
+
+    // Show the window with all expenses
+    gtk_widget_show_all(view_all_window);
+}
+// Function to handle the "Update Expense" button click
+typedef struct {
+    GtkWidget *entry_description;
+    GtkWidget *entry_amount;
+    GtkWidget *entry_category;
+    GtkWidget *entry_date;
+} ExpenseUpdateData;
+void update_expense(GtkWidget *widget, gpointer user_data) {
+    // Create a new window for updating expense details
+    GtkWidget *update_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(update_window), "Update Expense");
+    gtk_window_set_default_size(GTK_WINDOW(update_window), 350, 250);  // Adjust window size (reduce to fit content)
+    gtk_container_set_border_width(GTK_CONTAINER(update_window), 5);  // Reduce the border width
+
+    // Change the background color of the window to light blue (optional)
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(update_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(update_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        int x = monitor_geometry.x + (monitor_geometry.width - 350) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 250) / 2; // Center vertically
+        gtk_window_move(window, x, y);
+    }
+
+    // Create a grid layout for displaying input fields and buttons
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 8);  // Reduce column spacing
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 8);  // Reduce row spacing
+    gtk_container_add(GTK_CONTAINER(update_window), grid);
+
+    // Create an entry for entering the description of the expense to update
+    GtkWidget *entry_description = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_description), "Enter Description to Update");
+    gtk_grid_attach(GTK_GRID(grid), entry_description, 0, 0, 2, 1);
+    gtk_widget_set_size_request(entry_description, 300, 30);  // Set a fixed size for the entry
+
+    // Create an entry for entering the new amount
+    GtkWidget *entry_amount = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_amount), "New Amount");
+    gtk_grid_attach(GTK_GRID(grid), entry_amount, 0, 1, 2, 1);
+    gtk_widget_set_size_request(entry_amount, 300, 30);  // Set a fixed size for the entry
+
+    // Create an entry for entering the new category
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_category), "New Category");
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 0, 2, 2, 1);
+    gtk_widget_set_size_request(entry_category, 300, 30);  // Set a fixed size for the entry
+
+    // Create an entry for entering the new date
+    GtkWidget *entry_date = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_date), "New Date (DD/MM/YYYY)");
+    gtk_grid_attach(GTK_GRID(grid), entry_date, 0, 3, 2, 1);
+    gtk_widget_set_size_request(entry_date, 300, 30);  // Set a fixed size for the entry
+
+    // Create a button to save the updated expense
+    GtkWidget *button_update = gtk_button_new_with_label("Update Expense");
+    gtk_grid_attach(GTK_GRID(grid), button_update, 0, 4, 2, 1);
+    gtk_widget_set_size_request(button_update, 300, 40);  // Set a fixed size for the button
+
+    // Prepare the struct to pass to the signal handler
+    ExpenseUpdateData *update_data = g_malloc(sizeof(ExpenseUpdateData));
+    update_data->entry_description = entry_description;
+    update_data->entry_amount = entry_amount;
+    update_data->entry_category = entry_category;
+    update_data->entry_date = entry_date;
+
+    // Connect the button to save the updated expense
+    g_signal_connect(button_update, "clicked", G_CALLBACK(save_updated_expense), update_data);
+
+    // Create the "Back" button to close the window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), update_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 5, 2, 1);
+    gtk_widget_set_size_request(button_back, 300, 40);  // Set a fixed size for the button
+
+    // Show the update window
+    gtk_widget_show_all(update_window);
+}
+void save_updated_expense(GtkWidget *widget, gpointer data) {
+    // Cast data to the custom struct containing all the entry widgets
+    ExpenseUpdateData *update_data = (ExpenseUpdateData *)data;
+
+    const gchar *description = gtk_entry_get_text(GTK_ENTRY(update_data->entry_description));
+
+    // Search for the expense in the structure based on the description
+    gboolean found = FALSE;
+    for (int i = 0; i < expense_count; i++) {
+        if (g_strcmp0(expenses[i].description, description) == 0) {
+            // If found, prompt the user for the new details
+            const gchar *new_amount_str = gtk_entry_get_text(GTK_ENTRY(update_data->entry_amount));
+            const gchar *new_category = gtk_entry_get_text(GTK_ENTRY(update_data->entry_category));
+            const gchar *new_date = gtk_entry_get_text(GTK_ENTRY(update_data->entry_date));
+
+            // Update the expense details
+            expenses[i].amount = atof(new_amount_str);
+            strncpy(expenses[i].category, new_category, sizeof(expenses[i].category) - 1);
+            strncpy(expenses[i].date, new_date, sizeof(expenses[i].date) - 1);
+
+            // Save the updated expense back to the file
+            save_expenses_to_file();
+
+            found = TRUE;
+            break;
+        }
+    }
+
+    // Create a message to display (add a label if necessary)
+    GtkWidget *label_message = GTK_WIDGET(data);  // Assuming this is used to display the message
+    if (found) {
+        gtk_label_set_text(GTK_LABEL(label_message), "Expense updated successfully.");
+    } else {
+        gtk_label_set_text(GTK_LABEL(label_message), "Expense with this description not found.");
+    }
+
+    // Free the allocated memory for the update data
+    g_free(update_data);
+}
+// Function to handle the "View By Category" button click
+void view_by_category(GtkWidget *widget, gpointer data) {
+    // Create a new window for viewing expenses by category
+    GtkWidget *category_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(category_window), "Expenses By Category");
+    gtk_window_set_default_size(GTK_WINDOW(category_window), 350, 250);  // Reduce window size to fit content better
+    gtk_container_set_border_width(GTK_CONTAINER(category_window), 10);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(category_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        // Calculate the position based on the monitor geometry
+        int x = monitor_geometry.x + (monitor_geometry.width - 350) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 250) / 2; // Center vertically
+        gtk_window_move(window, x, y); // Move the window to the calculated position
+    }
+
+    // Apply a light blue background using CSS
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { background-color: lightblue; }", -1, NULL);
+    GtkStyleContext *style_context = gtk_widget_get_style_context(category_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    // Create a fixed container for layering widgets
+    GtkWidget *fixed = gtk_fixed_new();
+    gtk_container_add(GTK_CONTAINER(category_window), fixed);
+
+    // Create a grid layout for displaying category input and expenses
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_widget_set_halign(grid, GTK_ALIGN_CENTER);
+    gtk_widget_set_valign(grid, GTK_ALIGN_CENTER);
+    gtk_fixed_put(GTK_FIXED(fixed), grid, 0, 0);
+
+    // Create an entry for entering the category name
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_category), "Enter Category");
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 0, 0, 2, 1);
+
+    // Create a button to submit the category and view expenses
+    GtkWidget *button_view = gtk_button_new_with_label("View Expenses");
+    g_signal_connect(button_view, "clicked", G_CALLBACK(view_expenses_by_category), entry_category);
+    gtk_widget_set_hexpand(button_view, TRUE);  // Allow the button to expand horizontally
+    gtk_grid_attach(GTK_GRID(grid), button_view, 0, 1, 2, 1);
+
+    // Create the "Back" button to close the window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), category_window);
+    gtk_widget_set_hexpand(button_back, TRUE);  // Allow the button to expand horizontally
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 2, 2, 1);
+
+    // Show the category window
+    gtk_widget_show_all(category_window);
+}
+// Function to display expenses for the given category
+void view_expenses_by_category(GtkWidget *widget, gpointer entry_category) {
+    const gchar *category = gtk_entry_get_text(GTK_ENTRY(entry_category));
+
+    // Create a new window to show the expenses of the selected category
+    GtkWidget *expense_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(expense_window), "Expenses in Category");
+    gtk_window_set_default_size(GTK_WINDOW(expense_window), 400, 300);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(expense_window), 10);
+
+    // Change the background color of the window to light blue
+    GdkRGBA color = {0.678, 0.847, 0.902, 1.0};  // Light blue color (RGB)
+    gtk_widget_override_background_color(expense_window, GTK_STATE_FLAG_NORMAL, &color);
+
+    // Center the window on the screen
+    GtkWindow *window = GTK_WINDOW(expense_window);
+    GdkDisplay *display = gdk_display_get_default();
+    GdkMonitor *monitor = gdk_display_get_primary_monitor(display);
+    if (monitor) {
+        GdkRectangle monitor_geometry;
+        gdk_monitor_get_geometry(monitor, &monitor_geometry);
+        // Calculate the position based on the monitor geometry
+        int x = monitor_geometry.x + (monitor_geometry.width - 400) / 2;  // Center horizontally
+        int y = monitor_geometry.y + (monitor_geometry.height - 300) / 2; // Center vertically
+        gtk_window_move(window, x, y); // Move the window to the calculated position
+    }
+
+    // Create a grid layout to display expenses
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(expense_window), grid);
+
+    // Iterate through all expenses and display those that match the category
+    gboolean category_found = FALSE;
+    for (int i = 0; i < expense_count; i++) {
+        if (g_strcmp0(expenses[i].category, category) == 0) {
+            category_found = TRUE;
+
+            // Create a label to display the expense details
+            char expense_details[200];
+            snprintf(expense_details, sizeof(expense_details), "Description: %s\nAmount: %.2f\nDate: %s",
+                     expenses[i].description, expenses[i].amount, expenses[i].date);
+            GtkWidget *label = gtk_label_new(expense_details);
+            gtk_grid_attach(GTK_GRID(grid), label, 0, i, 1, 1);
+        }
+    }
+
+    if (!category_found) {
+        GtkWidget *label_no_expenses = gtk_label_new("No expenses found for this category.");
+        gtk_grid_attach(GTK_GRID(grid), label_no_expenses, 0, 0, 1, 1);
+    }
+
+    // Show the expense window
+    gtk_widget_show_all(expense_window);
+}
+// Function to handle the "View Total" button click
+void view_total(GtkWidget *widget, gpointer data) {
+    // Create a new window for viewing the total expenses
+    GtkWidget *total_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(total_window), "Total Expenses");
+    gtk_window_set_default_size(GTK_WINDOW(total_window), 300, 200);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(total_window), 10);
+    gtk_window_set_position(GTK_WINDOW(total_window), GTK_WIN_POS_CENTER); // Center the window on the screen
+
+    // Create a grid layout for displaying total and back button
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(total_window), grid);
+
+    // Calculate the total of all expenses
+    float total_expenses = 0;
+    for (int i = 0; i < expense_count; i++) {
+        total_expenses += expenses[i].amount;
+    }
+
+    // Display the total amount in the window
+    char total_text[100];
+    snprintf(total_text, sizeof(total_text), "Total Expenses: %.2f", total_expenses);
+    GtkWidget *label_total = gtk_label_new(total_text);
+    gtk_grid_attach(GTK_GRID(grid), label_total, 0, 0, 2, 1);
+
+    // Create the "Back" button to close the window
+    GtkWidget *button_back = gtk_button_new_with_label("Back");
+    g_signal_connect(button_back, "clicked", G_CALLBACK(gtk_widget_destroy), total_window);
+    gtk_grid_attach(GTK_GRID(grid), button_back, 0, 1, 2, 1);
+
+    // Set the background image using GtkCssProvider
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { "
+        "   background-image: url('/Users/himanshi/Desktop/unt_2/im10.jpg'); "
+        "   background-size: cover; "
+        "   background-repeat: no-repeat; "
+        "   background-position: center; "
+        "}",
+        -1, NULL);
+
+    GtkStyleContext *style_context = gtk_widget_get_style_context(total_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    g_object_unref(css_provider); // Free the CSS provider after use
+
+    // Show the total window
+    gtk_widget_show_all(total_window);
+}
+void write_expense_to_file() {
+    FILE *file = fopen(FILE_PATH, "a");
+    if (file == NULL) {
+        GtkWidget *error_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                         "Error opening file!");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+        return;
+    }
+
+    for (int i = 0; i < expense_count; i++) {
+        fprintf(file, "%s,%f,%s,%s\n", expenses[i].description, expenses[i].amount, expenses[i].category, expenses[i].date);
+    }
+
+    fclose(file);
+}
+
+// Function to handle the creation of a new expense
+void add_expense(GtkWidget *widget, gpointer data) {
+    // Create a new window for adding an expense
+    GtkWidget *add_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(add_window), "Add Expense");
+    gtk_window_set_default_size(GTK_WINDOW(add_window), 300, 250);  // Adjust window size
+    gtk_container_set_border_width(GTK_CONTAINER(add_window), 10);
+    gtk_window_set_position(GTK_WINDOW(add_window), GTK_WIN_POS_CENTER); // Center the window on the screen
+
+    // Create a grid layout for input and buttons
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 10);
+    gtk_container_add(GTK_CONTAINER(add_window), grid);
+
+    // Label and Entry for description
+    GtkWidget *label_desc = gtk_label_new("Description:");
+    gtk_grid_attach(GTK_GRID(grid), label_desc, 0, 0, 1, 1);
+    GtkWidget *entry_desc = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_desc, 1, 0, 1, 1);
+
+    // Label and Entry for amount
+    GtkWidget *label_amount = gtk_label_new("Amount:");
+    gtk_grid_attach(GTK_GRID(grid), label_amount, 0, 1, 1, 1);
+    GtkWidget *entry_amount = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_amount, 1, 1, 1, 1);
+
+    // Label and Entry for category
+    GtkWidget *label_category = gtk_label_new("Category:");
+    gtk_grid_attach(GTK_GRID(grid), label_category, 0, 2, 1, 1);
+    GtkWidget *entry_category = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_category, 1, 2, 1, 1);
+
+    // Label and Entry for date
+    GtkWidget *label_date = gtk_label_new("Date (DD/MM/YYYY):");
+    gtk_grid_attach(GTK_GRID(grid), label_date, 0, 3, 1, 1);
+    GtkWidget *entry_date = gtk_entry_new();
+    gtk_grid_attach(GTK_GRID(grid), entry_date, 1, 3, 1, 1);
+
+    // Create Button to save expense
+    GtkWidget *button_add = gtk_button_new_with_label("Add Expense");
+    gtk_grid_attach(GTK_GRID(grid), button_add, 0, 4, 2, 1);
+
+    // Create a list to store the entries
+    GList *entry_list = NULL;
+    entry_list = g_list_append(entry_list, entry_desc);
+    entry_list = g_list_append(entry_list, entry_amount);
+    entry_list = g_list_append(entry_list, entry_category);
+    entry_list = g_list_append(entry_list, entry_date);
+
+    // Connect the button to the function that will handle saving the expense
+    g_signal_connect(button_add, "clicked", G_CALLBACK(save_expense), entry_list);
+
+    // Set the background image using GtkCssProvider
+    GtkCssProvider *css_provider = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css_provider,
+        "window { "
+        "   background-image: url('/Users/himanshi/Desktop/unt_2/im3.gif'); "
+        "   background-size: cover; "
+        "   background-repeat: no-repeat; "
+        "   background-position: center; "
+        "}",
+        -1, NULL);
+
+    GtkStyleContext *style_context = gtk_widget_get_style_context(add_window);
+    gtk_style_context_add_provider(style_context,
+        GTK_STYLE_PROVIDER(css_provider),
+        GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    g_object_unref(css_provider); // Free the CSS provider after use
+
+    // Show the add window
+    g_signal_connect(add_window, "destroy", G_CALLBACK(gtk_widget_destroy), NULL);
+    gtk_widget_show_all(add_window);
+}
+// Function to save the entered expense to file and structure
+void save_expense(GtkWidget *widget, gpointer data) {
+    GList *entries = (GList *)data;
+
+    GtkWidget *entry_desc = GTK_WIDGET(entries->data);
+    GtkWidget *entry_amount = GTK_WIDGET(entries->next->data);
+    GtkWidget *entry_category = GTK_WIDGET(entries->next->next->data);
+    GtkWidget *entry_date = GTK_WIDGET(entries->next->next->next->data);
+
+    // Get the entered data
+    const char *desc = gtk_entry_get_text(GTK_ENTRY(entry_desc));
+    const char *amount_text = gtk_entry_get_text(GTK_ENTRY(entry_amount));
+    const char *category = gtk_entry_get_text(GTK_ENTRY(entry_category));
+    const char *date = gtk_entry_get_text(GTK_ENTRY(entry_date));
+
+    // Validate the fields
+    if (*desc == '\0' || *amount_text == '\0' || *category == '\0' || *date == '\0') {
+        GtkWidget *error_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                         "Please fill in all the fields!");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+        return;
+    }
+
+    // Validate amount
+    float amount = atof(amount_text);  // Convert amount to float
+    if (amount <= 0) {
+        GtkWidget *error_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK,
+                                                         "Please enter a valid amount!");
+        gtk_dialog_run(GTK_DIALOG(error_dialog));
+        gtk_widget_destroy(error_dialog);
+        return;
+    }
+
+    // Add the expense to the structure
+    strcpy(expenses[expense_count].description, desc);
+    expenses[expense_count].amount = amount;
+    strcpy(expenses[expense_count].category, category);
+    strcpy(expenses[expense_count].date, date);
+    expense_count++;
+
+    // Write the new expense to the file
+    write_expense_to_file();
+
+    // Show success message
+    GtkWidget *success_dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_INFO, GTK_BUTTONS_OK,
+                                                       "Expense added successfully!");
+    gtk_dialog_run(GTK_DIALOG(success_dialog));
+    gtk_widget_destroy(success_dialog);
+
+    // Close the add window
+    gtk_widget_destroy(gtk_widget_get_toplevel(widget));
+}
